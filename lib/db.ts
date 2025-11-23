@@ -6,6 +6,8 @@ if (!MONGODB_URI) {
   throw new Error("MONGODB_URI is not set. Define it in your .env file.");
 }
 
+const DB_URI = MONGODB_URI as string;
+
 interface LinkDocument {
   _id: mongoose.Types.ObjectId;
   code: string;
@@ -20,7 +22,7 @@ const LinkSchema = new Schema<LinkDocument>({
   targetUrl: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   lastClickedAt: { type: Date, default: null },
-  clicks: { type: Number, default: 0 }
+  clicks: { type: Number, default: 0 },
 });
 
 export const Link: Model<LinkDocument> =
@@ -28,6 +30,7 @@ export const Link: Model<LinkDocument> =
   mongoose.model<LinkDocument>("Link", LinkSchema);
 
 declare global {
+
   var mongooseConn:
     | {
         conn: typeof mongoose | null;
@@ -36,11 +39,9 @@ declare global {
     | undefined;
 }
 
-let cached = global.mongooseConn;
-
-if (!cached) {
-  cached = global.mongooseConn = { conn: null, promise: null };
-}
+const cached =
+  global.mongooseConn ??
+  (global.mongooseConn = { conn: null, promise: null });
 
 export async function connectToDatabase(): Promise<typeof mongoose> {
   if (cached.conn) {
@@ -48,8 +49,8 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
   }
 
   if (!cached.promise) {
-    const isAtlas = MONGODB_URI.includes("mongodb+srv://");
-    
+    const isAtlas = DB_URI.includes("mongodb+srv://");
+
     const opts: mongoose.ConnectOptions = {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
@@ -64,24 +65,22 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
     }
 
     cached.promise = mongoose
-      .connect(MONGODB_URI, opts)
+      .connect(DB_URI, opts)
       .then((m) => {
         console.log("✅ MongoDB connected successfully");
         return m;
       })
       .catch((error) => {
         console.error("❌ MongoDB connection error:", error.message);
-        console.error("Connection string format:", isAtlas ? "Atlas (+srv)" : "Standard");
+        console.error(
+          "Connection string format:",
+          isAtlas ? "Atlas (+srv)" : "Standard",
+        );
         cached.promise = null;
         throw error;
       });
   }
 
-  try {
-    cached.conn = await cached.promise;
-    return cached.conn;
-  } catch (error) {
-    cached.promise = null;
-    throw error;
-  }
+  cached.conn = await cached.promise;
+  return cached.conn;
 }
