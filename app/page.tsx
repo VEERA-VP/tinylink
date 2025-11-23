@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,13 +26,73 @@ interface LinkSingleResponse {
   link: LinkResponse;
 }
 
+const hostnamePattern = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i;
+
+const linkFormSchema = z.object({
+  url: z
+    .string()
+    .trim()
+    .min(1, "URL is required")
+    .transform((val) => {
+      if (!val) return "";
+
+      if (val.startsWith("http://") || val.startsWith("https://")) {
+        return val;
+      }
+      return `https://${val}`;
+    })
+    .refine(
+      (val) => {
+        if (!val) return false;
+        try {
+          const url = new URL(val);
+
+          const isHttp =
+            url.protocol === "http:" || url.protocol === "https:";
+
+          const hostnameValid = hostnamePattern.test(url.hostname);
+
+          return isHttp && hostnameValid;
+        } catch {
+          return false;
+        }
+      },
+      { message: "URL is not valid" }
+    ),
+  code: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        if (!val || val.trim().length === 0) return true;
+        return /^[A-Za-z0-9]{6,8}$/.test(val.trim());
+      },
+      {
+        message:
+          "Code must contain letters and digits only, length 6–8)"
+      }
+    )
+});
+
+type LinkFormData = z.infer<typeof linkFormSchema>;
+
 export default function HomePage() {
-  const [url, setUrl] = useState("");
-  const [code, setCode] = useState("");
   const [search, setSearch] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [links, setLinks] = useState<LinkResponse[]>([]);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    reset
+  } = useForm<LinkFormData>({
+    resolver: zodResolver(linkFormSchema),
+    defaultValues: {
+      url: "",
+      code: ""
+    }
+  });
 
   async function loadLinks() {
     try {
@@ -60,10 +123,8 @@ export default function HomePage() {
     });
   }, [links, search]);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function onSubmit(data: LinkFormData) {
     setError(null);
-    setIsSubmitting(true);
 
     try {
       const res = await fetch("/api/links", {
@@ -72,8 +133,8 @@ export default function HomePage() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          url,
-          code: code || undefined
+          url: data.url,
+          code: data.code?.trim() || undefined
         })
       });
 
@@ -89,15 +150,12 @@ export default function HomePage() {
       }
 
       if ("link" in payload) {
-        setUrl("");
-        setCode("");
+        reset();
         await loadLinks();
       }
     } catch (err) {
       console.error(err);
       setError("Network error while creating TinyLink");
-    } finally {
-      setIsSubmitting(false);
     }
   }
 
@@ -145,7 +203,7 @@ export default function HomePage() {
 
       <section className="rounded-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 via-slate-900/60 to-slate-900/80 backdrop-blur-sm shadow-2xl shadow-black/20 px-5 sm:px-6 py-6 space-y-5 animate-slide-up">
         <form
-          onSubmit={handleSubmit}
+          onSubmit={handleSubmit(onSubmit)}
           className="flex flex-col gap-5"
           autoComplete="off"
         >
@@ -154,10 +212,14 @@ export default function HomePage() {
             <Input
               id="url"
               placeholder="https://example.com/very/long/path..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
+              {...register("url")}
+              aria-invalid={errors.url ? "true" : "false"}
             />
+            {errors.url && (
+              <p className="text-xs text-red-400 animate-fade-in">
+                {errors.url.message}
+              </p>
+            )}
             <p className="text-xs text-slate-500">
               The destination URL that users will be redirected to
             </p>
@@ -175,11 +237,16 @@ export default function HomePage() {
               <Input
                 id="code"
                 placeholder="e.g. mylink"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
+                {...register("code")}
                 className="flex-1"
+                aria-invalid={errors.code ? "true" : "false"}
               />
             </div>
+            {errors.code && (
+              <p className="text-xs text-red-400 animate-fade-in">
+                {errors.code.message}
+              </p>
+            )}
             <p className="text-xs text-slate-500">
               Codes must be 6–8 characters (letters and digits only). Leave empty for auto-generation.
             </p>
